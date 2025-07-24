@@ -19,6 +19,7 @@ if lang == "日本語":
     RUN_ANALYSIS = "分析開始"
     SUMMARY_LABEL = "サマリー結果"
     DETAIL_LABEL = "詳細異常リスト"
+    EXPAND_LABEL = "詳細を見る"
 else:
     TITLE = "현금흐름표 체크툴"
     UPLOAD_LABEL = "이번 달 파일 (현재)"
@@ -31,6 +32,7 @@ else:
     RUN_ANALYSIS = "분석 시작"
     SUMMARY_LABEL = "요약 결과"
     DETAIL_LABEL = "상세 이상 리스트"
+    EXPAND_LABEL = "상세 보기"
 
 # --------------------------
 # UI Layout
@@ -58,16 +60,6 @@ def get_target_sheets(meta_df):
     watch_mask = meta_df.iloc[:, 1].astype(str).str.contains("中間計算", na=False)
     return meta_df[watch_mask].iloc[:, 0].tolist()
 
-def calculate_diff(df_now, df_prev):
-    try:
-        df1 = df_now.fillna(0).select_dtypes(include='number')
-        df2 = df_prev.fillna(0).select_dtypes(include='number')
-        diff = (df1 - df2).abs()
-        max_change = diff.max().max()
-        return max_change
-    except:
-        return None
-
 # --------------------------
 # Main Analysis
 # --------------------------
@@ -81,33 +73,58 @@ if uploaded_now:
                 st.error("metaシートがありません")
             else:
                 target_sheets = get_target_sheets(meta_df)
-                report_rows = []
+                summary_rows = []
+                detail_dict = {}
 
                 for sheet in target_sheets:
                     if sheet not in xls_now.sheet_names:
                         continue
-                    df_now = xls_now.parse(sheet, header=None)
+                    df_now = xls_now.parse(sheet, header=0)
+                    df_now_num = df_now.select_dtypes(include='number')
 
                     for label, file in compare_files.items():
                         if file is not None:
                             xls_prev = pd.ExcelFile(file, engine="openpyxl")
                             if sheet in xls_prev.sheet_names:
-                                df_prev = xls_prev.parse(sheet, header=None)
+                                df_prev = xls_prev.parse(sheet, header=0)
+                                df_prev_num = df_prev.select_dtypes(include='number')
+
                                 try:
-                                    df1 = df_now.fillna(0).select_dtypes(include='number')
-                                    df2 = df_prev.fillna(0).select_dtypes(include='number')
-                                    diff = ((df1 - df2) / (df2.replace(0, 1))).abs() * 100
-                                    over_threshold = diff > threshold
-                                    count = over_threshold.sum().sum()
+                                    df_diff = (df_now_num - df_prev_num).fillna(0)
+                                    df_ratio = ((df_diff / df_prev_num.replace(0, 1)) * 100).fillna(0)
+
+                                    flagged = (df_ratio.abs() > threshold)
+                                    count = flagged.sum().sum()
+
                                     if count > 0:
-                                        report_rows.append([sheet, label, int(count), f"{threshold}%超過"])
+                                        summary_rows.append([sheet, label, int(count), f"{threshold}%超過"])
+
+                                        detail_data = []
+                                        for r in range(df_ratio.shape[0]):
+                                            for c in range(df_ratio.shape[1]):
+                                                if flagged.iat[r, c]:
+                                                    item = df_now.columns[c]
+                                                    now_val = df_now_num.iat[r, c]
+                                                    prev_val = df_prev_num.iat[r, c] if r < df_prev_num.shape[0] else 0
+                                                    diff = now_val - prev_val
+                                                    ratio = df_ratio.iat[r, c]
+                                                    detail_data.append([item, now_val, prev_val, diff, f"{ratio:.1f}%"])
+
+                                        detail_df = pd.DataFrame(detail_data, columns=["項目", "現月", label, "増減額", "増減率"])
+                                        detail_key = f"{sheet}_{label}"
+                                        detail_dict[detail_key] = detail_df
                                 except:
                                     continue
 
-                if report_rows:
-                    result_df = pd.DataFrame(report_rows, columns=["シート名", "比較対象", "異常セル数", "条件"])
+                if summary_rows:
+                    result_df = pd.DataFrame(summary_rows, columns=["シート名", "比較対象", "異常セル数", "条件"])
                     st.subheader(SUMMARY_LABEL)
                     st.dataframe(result_df)
+
+                    st.subheader(DETAIL_LABEL)
+                    for key, df in detail_dict.items():
+                        with st.expander(f"{EXPAND_LABEL}: {key}"):
+                            st.dataframe(df)
                 else:
                     st.success("異常は検出されませんでした。")
 
