@@ -20,6 +20,7 @@ if lang == "日本語":
     DETAIL_LABEL = "詳細異常リスト"
     EXPAND_LABEL = "詳細を見る"
     REPORT_LABEL = "数値比較レポート"
+    ERROR_LABEL = "数式/入力/参照 チェック"
 else:
     TITLE = "현금흐름표 체크툴"
     UPLOAD_LABEL = "이번 달 파일 (현재)"
@@ -33,6 +34,7 @@ else:
     DETAIL_LABEL = "상세 이상 리스트"
     EXPAND_LABEL = "상세 보기"
     REPORT_LABEL = "수치 비교 리포트"
+    ERROR_LABEL = "수식/입력/참조 체크"
 
 # --------------------------
 # UI Layout
@@ -72,15 +74,12 @@ if uploaded_now:
                 st.error("metaシートがありません")
             else:
                 target_sheets = get_target_sheets(meta_df)
-                summary_rows = []
-                detail_dict = {}
                 report_dict = {}
 
                 for sheet in target_sheets:
                     if sheet not in xls_now.sheet_names:
                         continue
                     df_now = xls_now.parse(sheet, header=0)
-                    df_now_num = df_now.select_dtypes(include='number')
 
                     xls_prev1 = pd.ExcelFile(uploaded_prev1, engine="openpyxl") if uploaded_prev1 else None
                     xls_prev2 = pd.ExcelFile(uploaded_prev2, engine="openpyxl") if uploaded_prev2 else None
@@ -88,41 +87,7 @@ if uploaded_now:
                     df_prev1 = xls_prev1.parse(sheet, header=0) if xls_prev1 and sheet in xls_prev1.sheet_names else None
                     df_prev2 = xls_prev2.parse(sheet, header=0) if xls_prev2 and sheet in xls_prev2.sheet_names else None
 
-                    # 수치 비교 리포트용 테이블 생성
                     report_data = []
-                    for i in range(df_now_num.shape[0]):
-                        row = []
+                    for i in range(df_now.shape[0]):
                         item_name = df_now.iloc[i, 0] if i < len(df_now) else f"項目{i}"
-                        now_val = df_now_num.iloc[i].sum()
-                        prev1_val = df_prev1.iloc[i].select_dtypes(include='number').sum() if df_prev1 is not None and i < len(df_prev1) else 0
-                        prev2_val = df_prev2.iloc[i].select_dtypes(include='number').sum() if df_prev2 is not None and i < len(df_prev2) else 0
-
-                        diff1 = now_val - prev1_val
-                        diff2 = now_val - prev2_val
-                        ratio1 = f"{(diff1 / prev1_val * 100):.1f}%" if prev1_val != 0 else "-"
-                        ratio2 = f"{(diff2 / prev2_val * 100):.1f}%" if prev2_val != 0 else "-"
-
-                        row = [
-                            item_name,
-                            format_number(now_val),
-                            format_number(prev1_val),
-                            format_number(prev2_val),
-                            format_number(diff1),
-                            ratio1,
-                            ratio2
-                        ]
-                        report_data.append(row)
-
-                    report_df = pd.DataFrame(report_data, columns=["項目", "現月", "前月", "前々月", "増減額(前月)", "増減率(前月)", "増減率(前々月)"])
-                    report_dict[sheet] = report_df
-
-                # 보고 리포트 출력
-                st.subheader(REPORT_LABEL)
-                for sheet, df in report_dict.items():
-                    with st.expander(f"📄 {sheet}"):
-                        st.dataframe(df)
-
-        except Exception as e:
-            st.error(f"処理中エラー: {str(e)}")
-else:
-    st.info("現月ファイルをアップロードしてください。")
+                        now_val = df_now.iloc[i, 1:].sum(numeric_only=True)
