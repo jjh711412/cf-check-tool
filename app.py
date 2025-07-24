@@ -89,7 +89,9 @@ if uploaded_now:
 
                     report_data = []
                     for i in range(df_now.shape[0]):
-                        item_name = df_now.iloc[i, 0] if i < len(df_now) else f"項目{i}"
+                        raw_item = df_now.iloc[i, 0] if i < len(df_now) else f"項目{i}"
+                        item_name = raw_item if pd.notna(raw_item) and str(raw_item).strip() != "" else f"項目{i}"
+
                         now_val = pd.to_numeric(df_now.iloc[i, 1:], errors='coerce').sum()
                         prev1_val = pd.to_numeric(df_prev1.iloc[i, 1:], errors='coerce').sum() if df_prev1 is not None and i < len(df_prev1) else 0
                         prev2_val = pd.to_numeric(df_prev2.iloc[i, 1:], errors='coerce').sum() if df_prev2 is not None and i < len(df_prev2) else 0
