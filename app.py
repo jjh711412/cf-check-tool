@@ -91,3 +91,33 @@ if uploaded_now:
                     for i in range(df_now.shape[0]):
                         item_name = df_now.iloc[i, 0] if i < len(df_now) else f"項目{i}"
                         now_val = df_now.iloc[i, 1:].sum(numeric_only=True)
+                        prev1_val = df_prev1.iloc[i, 1:].sum(numeric_only=True) if df_prev1 is not None and i < len(df_prev1) else 0
+                        prev2_val = df_prev2.iloc[i, 1:].sum(numeric_only=True) if df_prev2 is not None and i < len(df_prev2) else 0
+
+                        diff1 = now_val - prev1_val
+                        diff2 = now_val - prev2_val
+                        ratio1 = f"{(diff1 / prev1_val * 100):.1f}%" if prev1_val != 0 else "-"
+                        ratio2 = f"{(diff2 / prev2_val * 100):.1f}%" if prev2_val != 0 else "-"
+
+                        report_data.append([
+                            item_name,
+                            format_number(now_val),
+                            format_number(prev1_val),
+                            format_number(prev2_val),
+                            format_number(diff1),
+                            ratio1,
+                            ratio2
+                        ])
+
+                    report_df = pd.DataFrame(report_data, columns=["項目", "現月", "前月", "前々月", "増減額(前月)", "増減率(前月)", "増減率(前々月)"])
+                    report_dict[sheet] = report_df
+
+                st.subheader(REPORT_LABEL)
+                for sheet, df in report_dict.items():
+                    with st.expander(f"📄 {sheet}"):
+                        st.dataframe(df)
+
+        except Exception as e:
+            st.error(f"処理中エラー: {str(e)}")
+else:
+    st.info("現月ファイルをアップロードしてください。")
