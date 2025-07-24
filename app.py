@@ -1,125 +1,72 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
 
-# --------------------------
-# UI Strings
-# --------------------------
-lang = st.sidebar.selectbox("言語 / Language", ["日本語", "한국어"])
+# 항목 매핑 예시 (추후 meta 시트 기반으로 자동 생성 가능)
+item_mapping = {
+    "1": "調整後EBITDA",
+    "2": "運転資本の増減",
+    "3": "割賦未払金及びリース債務の支払い",
+    "4": "法人税支払",
+    "5": "純利益"
+}
 
-if lang == "日本語":
-    TITLE = "現金流動表 チェックツール"
-    UPLOAD_LABEL = "現月のファイル (現在)"
-    PREV1_LABEL = "前月のファイル"
-    PREV2_LABEL = "前々月のファイル"
-    MODE_LABEL = "比較モード"
-    MODE_OPTIONS = ["單月比較", "総計比較"]
-    THRESHOLD_LABEL = "異常感知基準 (%)"
-    RUN_ANALYSIS = "分析開始"
-    SUMMARY_LABEL = "サマリー結果"
-    DETAIL_LABEL = "詳細異常リスト"
-    EXPAND_LABEL = "詳細を見る"
-    REPORT_LABEL = "数値比較レポート"
-    ERROR_LABEL = "数式/入力/参照 チェック"
-else:
-    TITLE = "현금흐름표 체크툴"
-    UPLOAD_LABEL = "이번 달 파일 (현재)"
-    PREV1_LABEL = "전월 파일"
-    PREV2_LABEL = "전전월 파일"
-    MODE_LABEL = "비교 모드"
-    MODE_OPTIONS = ["단월 비교", "누계 비교"]
-    THRESHOLD_LABEL = "이상 감지 기준 (%)"
-    RUN_ANALYSIS = "분석 시작"
-    SUMMARY_LABEL = "요약 결과"
-    DETAIL_LABEL = "상세 이상 리스트"
-    EXPAND_LABEL = "상세 보기"
-    REPORT_LABEL = "수치 비교 리포트"
-    ERROR_LABEL = "수식/입력/참조 체크"
+def generate_monthly_report_by_colname(df_now, df_prev, item_mapping, code_col="code", value_col="累計額"):
+    report = []
+    for idx in range(len(df_now)):
+        code = str(df_now.loc[idx, code_col]).strip()
+        name = item_mapping.get(code, "不明な項目")
 
-# --------------------------
-# UI Layout
-# --------------------------
-st.title(TITLE)
-
-uploaded_now = st.file_uploader(UPLOAD_LABEL, type=["xlsx"])
-uploaded_prev1 = st.file_uploader(PREV1_LABEL, type=["xlsx"])
-uploaded_prev2 = st.file_uploader(PREV2_LABEL, type=["xlsx"])
-
-mode = st.radio(MODE_LABEL, MODE_OPTIONS, horizontal=True)
-threshold = st.slider(THRESHOLD_LABEL, min_value=1, max_value=100, value=10, step=1)
-
-# --------------------------
-# Utility
-# --------------------------
-def get_target_sheets(meta_df):
-    watch_mask = meta_df.iloc[:, 1].astype(str).str.contains("中間計算", na=False)
-    return meta_df[watch_mask].iloc[:, 0].tolist()
-
-def format_number(n):
-    try:
-        return f"{int(n):,}"
-    except:
-        return n
-
-# --------------------------
-# Main Analysis
-# --------------------------
-if uploaded_now:
-    if st.button(RUN_ANALYSIS):
         try:
-            xls_now = pd.ExcelFile(uploaded_now, engine="openpyxl")
-            meta_df = xls_now.parse("meta", header=None) if "meta" in xls_now.sheet_names else None
+            val_now = float(df_now.loc[idx, value_col])
+            val_prev = float(df_prev.loc[idx, value_col])
+            if pd.isna(val_now) or pd.isna(val_prev):
+                continue
+        except (ValueError, TypeError):
+            continue
 
-            if meta_df is None:
-                st.error("metaシートがありません")
-            else:
-                target_sheets = get_target_sheets(meta_df)
-                report_dict = {}
+        diff = val_now - val_prev
+        rate = (diff / val_prev * 100) if val_prev != 0 else 0
 
-                for sheet in target_sheets:
-                    if sheet not in xls_now.sheet_names:
-                        continue
-                    df_now = xls_now.parse(sheet, header=0)
+        report.append({
+            "コード": code,
+            "項目名": name,
+            "現月": f"{int(round(val_now)):,}",
+            "前月": f"{int(round(val_prev)):,}",
+            "増減額": f"{int(round(diff)):,}",
+            "増減率": f"{round(rate, 1)}%"
+        })
 
-                    xls_prev1 = pd.ExcelFile(uploaded_prev1, engine="openpyxl") if uploaded_prev1 else None
-                    xls_prev2 = pd.ExcelFile(uploaded_prev2, engine="openpyxl") if uploaded_prev2 else None
+    return pd.DataFrame(report)
 
-                    df_prev1 = xls_prev1.parse(sheet, header=0) if xls_prev1 and sheet in xls_prev1.sheet_names else None
-                    df_prev2 = xls_prev2.parse(sheet, header=0) if xls_prev2 and sheet in xls_prev2.sheet_names else None
+# UI 시작
+st.set_page_config(page_title="月次CFチェックツール", layout="wide")
+st.title("📊 現金流動表：月次比較レポート")
 
-                    report_data = []
-                    for i in range(df_now.shape[0]):
-                        raw_item = df_now.iloc[i, 0] if i < len(df_now) else f"項目{i}"
-                        item_name = raw_item if pd.notna(raw_item) and str(raw_item).strip() != "" else f"項目{i}"
+uploaded_file = st.file_uploader("📤 今月ファイルをアップロード", type=["xlsx"])
+prev_file = st.file_uploader("📥 先月ファイルをアップロード", type=["xlsx"])
 
-                        now_val = pd.to_numeric(df_now.iloc[i, 1:], errors='coerce').sum()
-                        prev1_val = pd.to_numeric(df_prev1.iloc[i, 1:], errors='coerce').sum() if df_prev1 is not None and i < len(df_prev1) else 0
-                        prev2_val = pd.to_numeric(df_prev2.iloc[i, 1:], errors='coerce').sum() if df_prev2 is not None and i < len(df_prev2) else 0
+if uploaded_file and prev_file:
+    try:
+        df_now = pd.read_excel(uploaded_file, sheet_name="(報告用)CVCフォーマット", header=None)
+        df_prev = pd.read_excel(prev_file, sheet_name="(報告用)CVCフォーマット", header=None)
 
-                        diff1 = now_val - prev1_val
-                        diff2 = now_val - prev2_val
-                        ratio1 = f"{(diff1 / prev1_val * 100):.1f}%" if prev1_val != 0 else "-"
-                        ratio2 = f"{(diff2 / prev2_val * 100):.1f}%" if prev2_val != 0 else "-"
+        header_idx = df_now.apply(lambda row: row.astype(str).str.contains("code", na=False)).any(axis=1)
+        header_row_index = df_now[header_idx].index[0] if header_idx.any() else 0
 
-                        report_data.append([
-                            item_name,
-                            format_number(now_val),
-                            format_number(prev1_val),
-                            format_number(prev2_val),
-                            format_number(diff1),
-                            ratio1,
-                            ratio2
-                        ])
+        df_now.columns = df_now.iloc[header_row_index]
+        df_now = df_now.iloc[header_row_index + 1:].reset_index(drop=True)
+        df_prev.columns = df_prev.iloc[header_row_index]
+        df_prev = df_prev.iloc[header_row_index + 1:].reset_index(drop=True)
 
-                    report_df = pd.DataFrame(report_data, columns=["項目", "現月", "前月", "前々月", "増減額(前月)", "増減率(前月)", "増減率(前々月)"])
-                    report_dict[sheet] = report_df
+        result = generate_monthly_report_by_colname(df_now, df_prev, item_mapping)
 
-                st.subheader(REPORT_LABEL)
-                for sheet, df in report_dict.items():
-                    with st.expander(f"📄 {sheet}"):
-                        st.dataframe(df)
+        if not result.empty:
+            st.success("📈 増減比較が完了しました")
+            st.dataframe(result, use_container_width=True)
+        else:
+            st.warning("比較可能な数値データが見つかりませんでした。")
 
-        except Exception as e:
-            st.error(f"処理中エラー: {str(e)}")
+    except Exception as e:
+        st.error(f"処理中エラー: {e}")
 else:
-    st.info("現月ファイルをアップロードしてください。")
+    st.info("🔁 今月と前月の2つのExcelファイルをアップロードしてください。")
